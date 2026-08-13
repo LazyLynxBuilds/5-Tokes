@@ -2,7 +2,7 @@ const express=require('express');const http=require('http');const crypto=require
 const app=express(),server=http.createServer(app);
 const allowedOrigin=process.env.CORS_ORIGIN||'*';
 const io=new Server(server,{cors:{origin:allowedOrigin,methods:['GET','POST']},pingTimeout:20000,pingInterval:25000}),rooms=new Map();
-app.get('/health',(_,res)=>res.json({ok:true,name:'5 Tokes Multiplayer',version:'0.6.1',rooms:rooms.size,players:[...rooms.values()].reduce((n,r)=>n+r.players.filter(p=>p.connected).length,0)}));
+app.get('/health',(_,res)=>res.json({ok:true,name:'5 Tokes Multiplayer',version:'0.6.3',rooms:rooms.size,players:[...rooms.values()].reduce((n,r)=>n+r.players.filter(p=>p.connected).length,0)}));
 function roomCode(){const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let c;do{c=Array.from({length:5},()=>chars[Math.floor(Math.random()*chars.length)]).join('');}while(rooms.has(c));return c;}
 function cleanName(n){return String(n||'Player').trim().slice(0,20)||'Player';}
 function emitRoom(r){for(const p of r.players)if(p.connected&&p.socketId)io.to(p.socketId).emit('state',r.stateFor(p.id));}
@@ -18,6 +18,8 @@ io.on('connection',s=>{
   s.on('draw',source=>{try{const r=room();r.draw(s.data.playerId,source);emitRoom(r);}catch(e){fail(s,e);}});
   s.on('discard',cardId=>{try{const r=room();r.discard(s.data.playerId,cardId);emitRoom(r);}catch(e){fail(s,e);}});
   s.on('goOut',payload=>{try{const r=room();const p=typeof payload==='string'?{discardId:payload}:payload||{};r.goOut(s.data.playerId,p.discardId,p.melds);emitRoom(r);}catch(e){fail(s,e);}});
+  s.on('leaveRoom',()=>{try{const r=room(),code=r.code;const empty=r.leave(s.data.playerId);s.leave(code);s.data.roomCode=null;s.data.playerId=null;s.emit('roomExited',{reason:'left'});if(empty)rooms.delete(code);else emitRoom(r);}catch(e){fail(s,e);}});
+  s.on('forfeitGame',()=>{try{const r=room(),code=r.code;const empty=r.forfeit(s.data.playerId);s.leave(code);s.data.roomCode=null;s.data.playerId=null;s.emit('roomExited',{reason:'forfeit'});if(empty)rooms.delete(code);else emitRoom(r);}catch(e){fail(s,e);}});
   s.on('disconnect',()=>{const r=rooms.get(s.data.roomCode);if(!r)return;r.disconnect(s.data.playerId);emitRoom(r);});
 });
 setInterval(()=>{const cutoff=Date.now()-30*60*1000;for(const [c,r] of rooms)if(r.lastActivity<cutoff&&r.players.every(p=>!p.connected))rooms.delete(c);},60000).unref();

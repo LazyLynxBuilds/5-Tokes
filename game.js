@@ -43,12 +43,37 @@ function validateMeldLayout(hand,discardId,meldIdGroups,roundRank){
 }
 function newPlayer(name,socketId,token){return {id:crypto.randomUUID(),sessionToken:token||crypto.randomUUID(),socketId,name,hand:[],score:0,connected:true,finalDone:false,roundPenalty:null};}
 
+
 class GameRoom{
   constructor(code,hostSocketId,hostName,sessionToken){const p=newPlayer(hostName,hostSocketId,sessionToken);this.code=code;this.players=[p];this.hostId=p.id;this.started=false;this.roundRank=3;this.dealerIndex=0;this.turnIndex=0;this.turnStage='draw';this.drawPile=[];this.discardPile=[];this.outPlayerId=null;this.roundEnding=false;this.winnerIds=[];this.outMelds=[];this.message='Waiting for players.';this.lastActivity=Date.now();}
   touch(){this.lastActivity=Date.now();}
   addPlayer(socketId,name,token){if(this.started)throw new Error('Game already started.');if(this.players.length>=7)throw new Error('Room is full (7 players max).');const p=newPlayer(name,socketId,token);this.players.push(p);this.touch();return p;}
   reconnect(sessionToken,socketId){const p=this.players.find(x=>x.sessionToken===sessionToken);if(!p)throw new Error('Saved seat not found.');p.socketId=socketId;p.connected=true;this.touch();return p;}
   disconnect(playerId){const p=this.players.find(x=>x.id===playerId);if(p){p.connected=false;p.socketId=null;this.touch();}}
+  leave(playerId){
+    if(this.started)throw new Error('A game is active. Use Forfeit Game to leave.');
+    const idx=this.players.findIndex(p=>p.id===playerId);if(idx<0)throw new Error('Player not found.');
+    this.players.splice(idx,1);
+    if(this.hostId===playerId)this.hostId=this.players[0]?.id||null;
+    if(this.players.length){this.dealerIndex=Math.min(this.dealerIndex,this.players.length-1);this.turnIndex=Math.min(this.turnIndex,this.players.length-1);this.message='Waiting for players.';}
+    this.touch();return this.players.length===0;
+  }
+  forfeit(playerId){
+    if(!this.started)throw new Error('No active game to forfeit.');
+    const idx=this.players.findIndex(p=>p.id===playerId);if(idx<0)throw new Error('Player not found.');
+    const currentId=this.currentPlayer()?.id, dealerId=this.players[this.dealerIndex]?.id, wasCurrent=currentId===playerId;
+    const name=this.players[idx].name;this.players.splice(idx,1);
+    if(this.hostId===playerId)this.hostId=this.players[0]?.id||null;
+    if(!this.players.length){this.started=false;this.turnStage='gameover';this.winnerIds=[];this.message=`${name} forfeited. Room is empty.`;this.touch();return true;}
+    if(this.players.length===1){this.started=false;this.turnStage='gameover';this.winnerIds=[this.players[0].id];this.message=`${name} forfeited. ${this.players[0].name} wins by forfeit.`;this.turnIndex=0;this.dealerIndex=0;this.touch();return false;}
+    const currentNew=this.players.findIndex(p=>p.id===currentId);
+    this.turnIndex=wasCurrent?Math.min(idx,this.players.length-1):(currentNew>=0?currentNew:0);
+    if(wasCurrent&&idx>=this.players.length)this.turnIndex=0;
+    const dealerNew=this.players.findIndex(p=>p.id===dealerId);this.dealerIndex=dealerNew>=0?dealerNew:Math.min(this.dealerIndex,this.players.length-1);
+    this.turnStage='draw';this.message=`${name} forfeited the game.`;
+    if(this.roundEnding){const pending=this.players.filter(p=>p.id!==this.outPlayerId&&!p.finalDone);if(!pending.length)this.finishRound();}
+    this.touch();return false;
+  }
   start(requester){if(requester!==this.hostId)throw new Error('Only the host can start.');if(this.players.length<2)throw new Error('At least 2 players are required.');this.players=this.players.filter(p=>p.connected);if(this.players.length<2)throw new Error('At least 2 connected players are required.');this.hostId=this.players.some(p=>p.id===this.hostId)?this.hostId:this.players[0].id;this.started=true;this.roundRank=3;this.dealerIndex=0;this.winnerIds=[];this.players.forEach(p=>{p.score=0;p.roundPenalty=null;});this.startRound();}
   rematch(requester){if(requester!==this.hostId)throw new Error('Only the host can start a rematch.');if(this.started)throw new Error('The current game is still running.');this.start(requester);}
   startRound(){const deck=shuffle(createDeck());this.players.forEach(p=>{p.hand=[];p.finalDone=false;p.roundPenalty=null;});for(let c=0;c<this.roundRank;c++)for(const p of this.players)p.hand.push(deck.pop());this.drawPile=deck;this.discardPile=[this.drawPile.pop()];this.turnIndex=(this.dealerIndex+1)%this.players.length;this.turnStage='draw';this.outPlayerId=null;this.outMelds=[];this.roundEnding=false;this.message=`Round ${this.roundRank-2}: ${this.roundRank}s are wild.`;this.touch();}
