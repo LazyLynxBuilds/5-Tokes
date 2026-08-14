@@ -17,3 +17,13 @@ const aroom=new GameRoom('AV666','s1','Royal Roller','tok1','grinderqueen');cons
 assert.equal(aroom.stateFor(aroom.players[0].id).you.avatarKey,'grinderqueen');assert.equal(aroom.stateFor(aroom.players[0].id).players[1].avatarKey,'bonglord');
 aroom.players[0].hand=[c('joint',3,'r1'),c('leaf',9,'r2'),c('bong',5,'r3')];aroom.reorderHand(aroom.players[0].id,['r2','r3','r1']);assert.deepEqual(aroom.players[0].hand.map(x=>x.id),['r2','r3','r1']);
 console.log('all game tests passed');
+
+// Leaderboard snapshots include stable profile IDs and record winners once.
+const fs=require('fs'),os=require('os'),path=require('path');
+const {LeaderboardStore}=require('./leaderboardStore');
+const lbFile=path.join(os.tmpdir(),`five-tokes-lb-${Date.now()}.json`);
+const lr=new GameRoom('LB123','s1','Champ','tok1','kingkush','profile_champ_12345');const loser=lr.addPlayer('s2','Runner Up','tok2','maryjane','profile_runner_12345');
+lr.start(lr.players[0].id);lr.players[0].score=18;lr.players[1].score=44;lr.started=false;lr.turnStage='gameover';lr.winnerIds=[lr.players[0].id];
+const snap=lr.leaderboardSnapshot();assert.equal(snap.winnerProfileIds[0],'profile_champ_12345');assert.equal(snap.participants.length,2);
+const store=new LeaderboardStore(lbFile);assert.equal(store.recordGame(snap),true);assert.equal(store.recordGame(snap),false);const rows=store.entries();assert.equal(rows[0].name,'Champ');assert.equal(rows[0].wins,1);assert.equal(rows[0].goldenNuggets,1);assert.equal(rows[0].bestScore,18);try{fs.unlinkSync(lbFile)}catch{}
+console.log('leaderboard tests passed');
