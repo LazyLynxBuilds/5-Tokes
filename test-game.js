@@ -1,5 +1,5 @@
 const assert=require('assert');
-const {createDeck,validBook,validRun,findPartitionAll,canPartitionAll,goOutDiscardIds,minimumRemainingScore,validateMeldLayout,GameRoom}=require('./game');
+const {createDeck,validBook,validRun,findPartitionAll,canPartitionAll,goOutDiscardIds,minimumRemainingScore,validateMeldLayout,GameRoom,bestBotDiscard,chooseBotDrawSource}=require('./game');
 const deck=createDeck();assert.equal(deck.length,116);
 const c=(s,r,id=`${s}${r}`)=>({id,suit:s,rank:r,joker:false});const j=id=>({id,joker:true,suit:null,rank:null});
 assert(validBook([c('joint',9,'a'),c('leaf',9,'b'),j('j')],5));
@@ -17,6 +17,22 @@ const aroom=new GameRoom('AV666','s1','Royal Roller','tok1','grinderqueen');cons
 assert.equal(aroom.stateFor(aroom.players[0].id).you.avatarKey,'grinderqueen');assert.equal(aroom.stateFor(aroom.players[0].id).players[1].avatarKey,'bonglord');
 aroom.players[0].hand=[c('joint',3,'r1'),c('leaf',9,'r2'),c('bong',5,'r3')];aroom.reorderHand(aroom.players[0].id,['r2','r3','r1']);assert.deepEqual(aroom.players[0].hand.map(x=>x.id),['r2','r3','r1']);
 console.log('all game tests passed');
+
+
+// Computer-player mode: bots can join/start, prefer useful discards, and never appear as leaderboard profiles.
+const cpuRoom=new GameRoom('CPU69','human-socket','Human','human-token','maryjane','profile_human_cpu_12345');
+const cpu=cpuRoom.addComputerPlayer();
+assert.equal(cpu.isBot,true);assert.equal(cpu.profileId,null);assert.equal(cpu.avatarKey,'highstakes');
+cpuRoom.start(cpuRoom.players[0].id);assert.equal(cpuRoom.players.length,2);assert.equal(cpuRoom.players[1].isBot,true);
+const botHand=[c('joint',8,'b1'),c('leaf',8,'b2'),c('bong',8,'b3'),c('lighter',13,'b4')];
+const botDiscard=bestBotDiscard(botHand,5);assert.equal(botDiscard.card.id,'b4');assert.equal(botDiscard.penalty,0);
+assert.equal(chooseBotDrawSource(botHand,j('cpu-joker'),5),'discard');
+const stepRoom=new GameRoom('CPU70','hs','Human','ht');const stepCpu=stepRoom.addComputerPlayer();stepRoom.started=true;stepRoom.roundRank=5;stepRoom.turnIndex=1;stepRoom.turnStage='draw';stepCpu.hand=[c('joint',8,'s1'),c('leaf',8,'s2'),c('lighter',13,'s4')];stepRoom.drawPile=[c('bong',4,'deck1')];stepRoom.discardPile=[c('bong',8,'s3')];
+let cpuAction=stepRoom.computerStep();assert.equal(cpuAction.stage,'draw');assert.equal(cpuAction.source,'discard');assert.equal(stepRoom.turnStage,'discard');
+cpuAction=stepRoom.computerStep();assert.equal(cpuAction.stage,'goOut');assert.equal(stepRoom.outPlayerId,stepCpu.id);assert.equal(stepRoom.roundEnding,true);
+cpuRoom.started=false;cpuRoom.turnStage='gameover';cpuRoom.players[0].score=42;cpuRoom.players[1].score=18;cpuRoom.winnerIds=[cpuRoom.players[1].id];
+const cpuSnap=cpuRoom.leaderboardSnapshot();assert.equal(cpuSnap.participants.length,1);assert.equal(cpuSnap.participants[0].name,'Human');assert.equal(cpuSnap.winnerProfileIds.length,0);
+console.log('computer player tests passed');
 
 // Leaderboard snapshots include stable profile IDs and record winners once.
 const fs=require('fs'),os=require('os'),path=require('path');

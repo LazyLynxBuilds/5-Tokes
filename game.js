@@ -53,13 +53,34 @@ function validateMeldLayout(hand,discardId,meldIdGroups,roundRank){
   for(const ids of meldIdGroups){if(!Array.isArray(ids)||ids.length<3)return false;const cards=[];for(const id of ids){if(seen.has(id)||!byId.has(id))return false;seen.add(id);cards.push(byId.get(id));}if(!validMeld(cards,roundRank))return false;}
   return seen.size===remaining.length;
 }
-function newPlayer(name,socketId,token,avatarKey='jahbuddy',profileId=null){return {id:crypto.randomUUID(),profileId:profileId||crypto.randomUUID(),sessionToken:token||crypto.randomUUID(),socketId,name,avatarKey,hand:[],score:0,connected:true,finalDone:false,roundPenalty:null};}
+function newPlayer(name,socketId,token,avatarKey='jahbuddy',profileId=null,isBot=false){
+  return {id:crypto.randomUUID(),profileId:isBot?null:(profileId||crypto.randomUUID()),sessionToken:isBot?null:(token||crypto.randomUUID()),socketId:isBot?null:socketId,name,avatarKey,hand:[],score:0,connected:true,finalDone:false,roundPenalty:null,isBot:!!isBot};
+}
+function bestBotDiscard(cards,roundRank){
+  if(!cards.length)return null;
+  let best=null;
+  for(const card of cards){
+    const remaining=cards.filter(c=>c.id!==card.id);
+    const penalty=minimumRemainingScore(remaining,roundRank);
+    const raw=scoreCard(card,roundRank);
+    if(!best||penalty<best.penalty||(penalty===best.penalty&&raw>best.raw))best={card,penalty,raw};
+  }
+  return best;
+}
+function chooseBotDrawSource(hand,discardTop,roundRank){
+  if(!discardTop)return 'deck';
+  if(isWild(discardTop,roundRank))return 'discard';
+  const current=minimumRemainingScore(hand,roundRank);
+  const withTop=bestBotDiscard([...hand,discardTop],roundRank);
+  return withTop&&withTop.penalty<current?'discard':'deck';
+}
 
 
 class GameRoom{
   constructor(code,hostSocketId,hostName,sessionToken,avatarKey='jahbuddy',profileId=null){const p=newPlayer(hostName,hostSocketId,sessionToken,avatarKey,profileId);this.code=code;this.players=[p];this.hostId=p.id;this.started=false;this.roundRank=3;this.dealerIndex=0;this.turnIndex=0;this.turnStage='draw';this.drawPile=[];this.discardPile=[];this.outPlayerId=null;this.roundEnding=false;this.winnerIds=[];this.outMelds=[];this.message='Waiting for players.';this.lastActivity=Date.now();this.gameId=null;this.gameParticipants=[];this.forfeitedParticipants=[];}
   touch(){this.lastActivity=Date.now();}
   addPlayer(socketId,name,token,avatarKey='jahbuddy',profileId=null){if(this.started)throw new Error('Game already started.');if(this.players.length>=7)throw new Error('Room is full (7 players max).');const p=newPlayer(name,socketId,token,avatarKey,profileId);this.players.push(p);this.touch();return p;}
+  addComputerPlayer(name='Royal Toker CPU',avatarKey='highstakes'){if(this.started)throw new Error('Game already started.');if(this.players.length>=7)throw new Error('Room is full (7 players max).');const p=newPlayer(name,null,null,avatarKey,null,true);this.players.push(p);this.touch();return p;}
   reconnect(sessionToken,socketId){const p=this.players.find(x=>x.sessionToken===sessionToken);if(!p)throw new Error('Saved seat not found.');p.socketId=socketId;p.connected=true;this.touch();return p;}
   disconnect(playerId){const p=this.players.find(x=>x.id===playerId);if(p){p.connected=false;p.socketId=null;this.touch();}}
   leave(playerId){
@@ -86,7 +107,7 @@ class GameRoom{
     if(this.roundEnding){const pending=this.players.filter(p=>p.id!==this.outPlayerId&&!p.finalDone);if(!pending.length)this.finishRound();}
     this.touch();return false;
   }
-  start(requester){if(requester!==this.hostId)throw new Error('Only the host can start.');if(this.players.length<2)throw new Error('At least 2 players are required.');this.players=this.players.filter(p=>p.connected);if(this.players.length<2)throw new Error('At least 2 connected players are required.');this.hostId=this.players.some(p=>p.id===this.hostId)?this.hostId:this.players[0].id;this.gameId=crypto.randomUUID();this.gameParticipants=this.players.map(p=>({id:p.id,profileId:p.profileId,name:p.name,avatarKey:p.avatarKey}));this.forfeitedParticipants=[];this.started=true;this.roundRank=3;this.dealerIndex=0;this.winnerIds=[];this.players.forEach(p=>{p.score=0;p.roundPenalty=null;});this.startRound();}
+  start(requester){if(requester!==this.hostId)throw new Error('Only the host can start.');if(this.players.length<2)throw new Error('At least 2 players are required.');this.players=this.players.filter(p=>p.isBot||p.connected);if(this.players.length<2)throw new Error('At least 2 connected players are required.');this.hostId=this.players.some(p=>p.id===this.hostId)?this.hostId:this.players.find(p=>!p.isBot)?.id||this.players[0].id;this.gameId=crypto.randomUUID();this.gameParticipants=this.players.map(p=>({id:p.id,profileId:p.profileId,name:p.name,avatarKey:p.avatarKey,isBot:p.isBot}));this.forfeitedParticipants=[];this.started=true;this.roundRank=3;this.dealerIndex=0;this.winnerIds=[];this.players.forEach(p=>{p.score=0;p.roundPenalty=null;});this.startRound();}
   rematch(requester){if(requester!==this.hostId)throw new Error('Only the host can start a rematch.');if(this.started)throw new Error('The current game is still running.');this.start(requester);}
   startRound(){const deck=shuffle(createDeck());this.players.forEach(p=>{p.hand=[];p.finalDone=false;p.roundPenalty=null;});for(let c=0;c<this.roundRank;c++)for(const p of this.players)p.hand.push(deck.pop());this.drawPile=deck;this.discardPile=[this.drawPile.pop()];this.turnIndex=(this.dealerIndex+1)%this.players.length;this.turnStage='draw';this.outPlayerId=null;this.outMelds=[];this.roundEnding=false;this.message=`Round ${this.roundRank-2}: ${this.roundRank}s are wild.`;this.touch();}
   currentPlayer(){return this.players[this.turnIndex];}
@@ -96,6 +117,34 @@ class GameRoom{
   reorderHand(id,orderedIds){const p=this.players.find(x=>x.id===id);if(!p)throw new Error('Player not found.');if(!Array.isArray(orderedIds)||orderedIds.length!==p.hand.length)throw new Error('Invalid hand order.');const byId=new Map(p.hand.map(c=>[c.id,c]));const seen=new Set();const next=[];for(const cid of orderedIds){if(seen.has(cid)||!byId.has(cid))throw new Error('Invalid hand order.');seen.add(cid);next.push(byId.get(cid));}p.hand=next;this.touch();}
   discard(id,cardIdToDiscard){this.ensureTurn(id,'discard');const p=this.currentPlayer(),idx=p.hand.findIndex(c=>c.id===cardIdToDiscard);if(idx<0)throw new Error('Card not found in your hand.');const [card]=p.hand.splice(idx,1);this.discardPile.push(card);if(this.roundEnding&&id!==this.outPlayerId){p.finalDone=true;p.roundPenalty=minimumRemainingScore(p.hand,this.roundRank);}this.touch();this.advanceTurn();}
   goOut(id,discardId,melds){this.ensureTurn(id,'discard');if(this.roundEnding)throw new Error('Someone has already gone out.');const p=this.currentPlayer(),idx=p.hand.findIndex(c=>c.id===discardId);if(idx<0)throw new Error('Choose a card to discard.');const remaining=p.hand.filter(c=>c.id!==discardId);let finalGroups=null;if(melds&&melds.length&&validateMeldLayout(p.hand,discardId,melds,this.roundRank)){const before=new Map(p.hand.map(c=>[c.id,c]));finalGroups=melds.map(g=>g.map(cid=>before.get(cid)).filter(Boolean));}else finalGroups=findPartitionAll(remaining,this.roundRank);if(!finalGroups)throw new Error('The remaining cards cannot all be arranged into valid books/runs.');this.outMelds=finalGroups.map(g=>g.map(publicCard));const [card]=p.hand.splice(idx,1);this.discardPile.push(card);p.roundPenalty=0;p.finalDone=true;this.outPlayerId=id;this.roundEnding=true;this.message=`${p.name} went out! Everyone else gets one final turn.`;this.touch();this.advanceTurn();}
+  computerStep(){
+    const bot=this.currentPlayer();
+    if(!this.started||!bot?.isBot)return {acted:false};
+    if(this.turnStage==='draw'){
+      const source=chooseBotDrawSource(bot.hand,this.discardPile[this.discardPile.length-1],this.roundRank);
+      this.draw(bot.id,source);
+      this.message=`${bot.name} drew from the ${source==='discard'?'discard pile':'deck'}.`;
+      return {acted:true,stage:'draw',source};
+    }
+    if(this.turnStage==='discard'){
+      if(!this.roundEnding){
+        const outs=goOutDiscardIds(bot.hand,this.roundRank);
+        if(outs.length){
+          const choice=outs.map(id=>bot.hand.find(c=>c.id===id)).filter(Boolean).sort((a,b)=>scoreCard(b,this.roundRank)-scoreCard(a,this.roundRank))[0];
+          this.goOut(bot.id,choice.id,null);
+          return {acted:true,stage:'goOut',cardId:choice.id};
+        }
+      }
+      const roundBefore=this.roundRank;
+      const choice=bestBotDiscard(bot.hand,this.roundRank);
+      if(!choice)throw new Error('Computer has no card to discard.');
+      const cardId=choice.card.id;
+      this.discard(bot.id,cardId);
+      if(this.started&&this.roundRank===roundBefore)this.message=`${bot.name} discarded a card.`;
+      return {acted:true,stage:'discard',cardId};
+    }
+    return {acted:false};
+  }
   advanceTurn(){if(this.roundEnding){const pending=this.players.filter(p=>p.id!==this.outPlayerId&&!p.finalDone);if(!pending.length)return this.finishRound();let next=this.turnIndex;for(let k=0;k<this.players.length;k++){next=(next+1)%this.players.length;if(this.players[next].id!==this.outPlayerId&&!this.players[next].finalDone)break;}this.turnIndex=next;this.turnStage='draw';return;}this.turnIndex=(this.turnIndex+1)%this.players.length;this.turnStage='draw';}
   finishRound(){for(const p of this.players){if(p.id===this.outPlayerId)p.roundPenalty=0;else if(p.roundPenalty==null)p.roundPenalty=minimumRemainingScore(p.hand,this.roundRank);p.score+=p.roundPenalty;}if(this.roundRank===13){const min=Math.min(...this.players.map(p=>p.score));this.winnerIds=this.players.filter(p=>p.score===min).map(p=>p.id);this.message=`Game over. Lowest score wins: ${min}.`;this.started=false;this.turnStage='gameover';this.touch();return;}this.roundRank++;this.dealerIndex=(this.dealerIndex+1)%this.players.length;this.startRound();}
   leaderboardSnapshot(){
@@ -103,13 +152,13 @@ class GameRoom{
     const currentById=new Map(this.players.map(p=>[p.id,p]));
     const forfeitedById=new Map(this.forfeitedParticipants.map(p=>[p.id,p]));
     const endedByForfeit=/wins by forfeit/i.test(this.message||'');
-    const participants=this.gameParticipants.map(base=>{
+    const participants=this.gameParticipants.filter(base=>!base.isBot).map(base=>{
       const cur=currentById.get(base.id),forfeit=forfeitedById.get(base.id);
       return {...base,score:endedByForfeit?null:(cur&&Number.isFinite(cur.score)?cur.score:null),forfeit:!!forfeit};
     });
     const winnerProfileIds=this.winnerIds.map(id=>currentById.get(id)?.profileId||this.gameParticipants.find(p=>p.id===id)?.profileId).filter(Boolean);
     return {gameId:this.gameId,participants,winnerProfileIds,completedAt:Date.now()};
   }
-  stateFor(id){const me=this.players.find(p=>p.id===id),currentId=this.currentPlayer()?.id;const goOutIds=me&&this.started&&currentId===id&&this.turnStage==='discard'&&!this.roundEnding?goOutDiscardIds(me.hand,this.roundRank):[];return {code:this.code,gameId:this.gameId,hostId:this.hostId,started:this.started,roundRank:this.roundRank,roundNumber:this.roundRank-2,dealerIndex:this.dealerIndex,turnIndex:this.turnIndex,turnStage:this.turnStage,currentPlayerId:currentId,outPlayerId:this.outPlayerId,roundEnding:this.roundEnding,discardTop:publicCard(this.discardPile[this.discardPile.length-1]),drawCount:this.drawPile.length,message:this.message,winnerIds:this.winnerIds,outMelds:this.outMelds,canRematch:!this.started&&this.winnerIds.length>0,canGoOut:goOutIds.length>0,goOutDiscardIds:goOutIds,you:me?{id:me.id,profileId:me.profileId,name:me.name,avatarKey:me.avatarKey,hand:me.hand.map(publicCard),score:me.score,roundPenalty:me.roundPenalty}:null,players:this.players.map((p,i)=>({id:p.id,profileId:p.profileId,name:p.name,avatarKey:p.avatarKey,score:p.score,cardCount:p.hand.length,connected:p.connected,dealer:i===this.dealerIndex,finalDone:p.finalDone,winner:this.winnerIds.includes(p.id)}))};}
+  stateFor(id){const me=this.players.find(p=>p.id===id),currentId=this.currentPlayer()?.id;const goOutIds=me&&this.started&&currentId===id&&this.turnStage==='discard'&&!this.roundEnding?goOutDiscardIds(me.hand,this.roundRank):[];return {code:this.code,gameId:this.gameId,hostId:this.hostId,started:this.started,roundRank:this.roundRank,roundNumber:this.roundRank-2,dealerIndex:this.dealerIndex,turnIndex:this.turnIndex,turnStage:this.turnStage,currentPlayerId:currentId,outPlayerId:this.outPlayerId,roundEnding:this.roundEnding,discardTop:publicCard(this.discardPile[this.discardPile.length-1]),drawCount:this.drawPile.length,message:this.message,winnerIds:this.winnerIds,outMelds:this.outMelds,canRematch:!this.started&&this.winnerIds.length>0,canGoOut:goOutIds.length>0,goOutDiscardIds:goOutIds,you:me?{id:me.id,profileId:me.profileId,name:me.name,avatarKey:me.avatarKey,hand:me.hand.map(publicCard),score:me.score,roundPenalty:me.roundPenalty}:null,players:this.players.map((p,i)=>({id:p.id,profileId:p.profileId,name:p.name,avatarKey:p.avatarKey,isBot:!!p.isBot,score:p.score,cardCount:p.hand.length,connected:p.connected,dealer:i===this.dealerIndex,finalDone:p.finalDone,winner:this.winnerIds.includes(p.id)}))};}
 }
-module.exports={GameRoom,createDeck,isWild,scoreCard,validBook,validRun,validMeld,findPartitionAll,canPartitionAll,goOutDiscardIds,minimumRemainingScore,validateMeldLayout};
+module.exports={GameRoom,createDeck,isWild,scoreCard,validBook,validRun,validMeld,findPartitionAll,canPartitionAll,goOutDiscardIds,minimumRemainingScore,validateMeldLayout,bestBotDiscard,chooseBotDrawSource};
