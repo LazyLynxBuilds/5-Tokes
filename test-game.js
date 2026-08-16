@@ -51,3 +51,20 @@ lr.start(lr.players[0].id);lr.players[0].score=18;lr.players[1].score=44;lr.star
 const snap=lr.leaderboardSnapshot();assert.equal(snap.winnerProfileIds[0],'profile_champ_12345');assert.equal(snap.participants.length,2);
 const store=new LeaderboardStore(lbFile);assert.equal(store.recordGame(snap),true);assert.equal(store.recordGame(snap),false);const rows=store.entries();assert.equal(rows[0].name,'Champ');assert.equal(rows[0].wins,1);assert.equal(rows[0].goldenNuggets,1);assert.equal(rows[0].bestScore,18);try{fs.unlinkSync(lbFile)}catch{}
 console.log('leaderboard tests passed');
+
+// v0.7.4: final-turn melds are revealed, score announcements are published, and submitted stashes determine final-turn penalty.
+const reveal=new GameRoom('REV74','s1','Out Player','t1');const revealP2=reveal.addPlayer('s2','Final Player','t2');
+reveal.started=true;reveal.roundRank=7;reveal.turnIndex=1;reveal.turnStage='discard';reveal.roundEnding=true;reveal.outPlayerId=reveal.players[0].id;reveal.players[0].finalDone=true;
+reveal.players[1].hand=[c('joint',9,'rv1'),c('leaf',9,'rv2'),c('bong',9,'rv3'),c('lighter',4,'rv4'),c('joint',6,'rv5')];reveal.drawPile=[c('leaf',3,'rvd')];reveal.discardPile=[c('bong',6,'rvt')];
+reveal.discard(revealP2.id,{cardId:'rv5',melds:[['rv1','rv2','rv3']]});
+assert.equal(reveal.revealedMelds.length,1);assert.equal(reveal.revealedMelds[0].melds.length,1);assert.equal(reveal.revealedMelds[0].points,4);assert.equal(reveal.lastScoreAnnouncement.points,4);assert.equal(revealP2.score,4);
+
+// v0.7.4: an undo can be requested after a turn-ending move, requires next-player approval, and restores the prior turn state.
+const undoRoom=new GameRoom('UND74','s1','First','t1');const undoP2=undoRoom.addPlayer('s2','Second','t2');undoRoom.started=true;undoRoom.roundRank=5;undoRoom.turnIndex=0;undoRoom.turnStage='discard';undoRoom.players[0].hand=[c('joint',4,'u1'),c('leaf',6,'u2')];undoRoom.players[1].hand=[c('bong',7,'u3')];undoRoom.drawPile=[c('lighter',8,'ud')];undoRoom.discardPile=[c('grinder',3,'ut')];
+const firstId=undoRoom.players[0].id;undoRoom.discard(firstId,'u2');assert.equal(undoRoom.currentPlayer().id,undoP2.id);assert.equal(undoRoom.stateFor(firstId).undo.canRequest,true);undoRoom.requestUndo(firstId);assert.equal(undoRoom.stateFor(undoP2.id).undo.canRespond,true);undoRoom.respondUndo(undoP2.id,true);assert.equal(undoRoom.currentPlayer().id,firstId);assert.equal(undoRoom.turnStage,'discard');assert(undoRoom.players[0].hand.some(x=>x.id==='u2'));assert.equal(undoRoom.discardPile[undoRoom.discardPile.length-1].id,'ut');
+
+// Drawing closes the undo window; denied/expired requests leave the next player's turn intact.
+const closeRoom=new GameRoom('CLS74','s1','First','t1');const closeP2=closeRoom.addPlayer('s2','Second','t2');closeRoom.started=true;closeRoom.roundRank=5;closeRoom.turnIndex=0;closeRoom.turnStage='discard';closeRoom.players[0].hand=[c('joint',4,'c1')];closeRoom.players[1].hand=[c('bong',7,'c2')];closeRoom.drawPile=[c('lighter',8,'cd')];closeRoom.discardPile=[c('grinder',3,'ct')];const closeFirst=closeRoom.players[0].id;closeRoom.discard(closeFirst,'c1');closeRoom.draw(closeP2.id,'deck');assert.equal(closeRoom.stateFor(closeFirst).undo,null);assert.throws(()=>closeRoom.requestUndo(closeFirst),/undo window/i);
+
+const denyRoom=new GameRoom('DEN74','s1','First','t1');const denyP2=denyRoom.addPlayer('s2','Second','t2');denyRoom.started=true;denyRoom.roundRank=5;denyRoom.turnIndex=0;denyRoom.turnStage='discard';denyRoom.players[0].hand=[c('joint',4,'d1')];denyRoom.players[1].hand=[c('bong',7,'d2')];denyRoom.drawPile=[c('lighter',8,'dd')];denyRoom.discardPile=[c('grinder',3,'dt')];const denyFirst=denyRoom.players[0].id;denyRoom.discard(denyFirst,'d1');denyRoom.requestUndo(denyFirst);denyRoom.respondUndo(denyP2.id,false);assert.equal(denyRoom.currentPlayer().id,denyP2.id);assert.equal(denyRoom.turnStage,'draw');assert.equal(denyRoom.pendingUndo,null);
+console.log('v0.7.4 reveal, scoring, and undo tests passed');

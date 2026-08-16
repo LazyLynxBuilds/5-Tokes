@@ -1,6 +1,6 @@
 {
   "name": "five-tokes-server",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "private": true,
   "main": "server.js",
   "scripts": {
