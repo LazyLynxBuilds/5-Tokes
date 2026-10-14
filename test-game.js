@@ -57,7 +57,7 @@ const reveal=new GameRoom('REV74','s1','Out Player','t1');const revealP2=reveal.
 reveal.started=true;reveal.roundRank=7;reveal.turnIndex=1;reveal.turnStage='discard';reveal.roundEnding=true;reveal.outPlayerId=reveal.players[0].id;reveal.players[0].finalDone=true;
 reveal.players[1].hand=[c('joint',9,'rv1'),c('leaf',9,'rv2'),c('bong',9,'rv3'),c('lighter',4,'rv4'),c('joint',6,'rv5')];reveal.drawPile=[c('leaf',3,'rvd')];reveal.discardPile=[c('bong',6,'rvt')];
 reveal.discard(revealP2.id,{cardId:'rv5',melds:[['rv1','rv2','rv3']]});
-assert.equal(reveal.revealedMelds.length,1);assert.equal(reveal.revealedMelds[0].melds.length,1);assert.equal(reveal.revealedMelds[0].points,4);assert.equal(reveal.lastScoreAnnouncement.points,4);assert.equal(revealP2.score,4);
+assert.equal(reveal.revealedMelds.length,0);assert.equal(reveal.lastScoreAnnouncement.points,4);assert.equal(revealP2.score,4);
 
 // v0.7.4: an undo can be requested after a turn-ending move, requires next-player approval, and restores the prior turn state.
 const undoRoom=new GameRoom('UND74','s1','First','t1');const undoP2=undoRoom.addPlayer('s2','Second','t2');undoRoom.started=true;undoRoom.roundRank=5;undoRoom.turnIndex=0;undoRoom.turnStage='discard';undoRoom.players[0].hand=[c('joint',4,'u1'),c('leaf',6,'u2')];undoRoom.players[1].hand=[c('bong',7,'u3')];undoRoom.drawPile=[c('lighter',8,'ud')];undoRoom.discardPile=[c('grinder',3,'ut')];

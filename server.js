@@ -14,7 +14,7 @@ const leaderboardPath=process.env.LEADERBOARD_FILE||path.join(__dirname,'data','
 const leaderboard=new LeaderboardStore(leaderboardPath);
 
 function leaderboardPayload(limit=100){return {updatedAt:Date.now(),entries:leaderboard.entries(limit)};}
-app.get('/health',(_,res)=>res.json({ok:true,name:'5 Tokes Multiplayer',version:'0.7.4',rooms:rooms.size,players:[...rooms.values()].reduce((n,r)=>n+r.players.filter(p=>p.connected&&!p.isBot).length,0),computerPlayers:[...rooms.values()].reduce((n,r)=>n+r.players.filter(p=>p.isBot).length,0),leaderboardEntries:leaderboard.entries(500).length}));
+app.get('/health',(_,res)=>res.json({ok:true,name:'5 Tokes Multiplayer',version:'0.7.9',rooms:rooms.size,players:[...rooms.values()].reduce((n,r)=>n+r.players.filter(p=>p.connected&&!p.isBot).length,0),computerPlayers:[...rooms.values()].reduce((n,r)=>n+r.players.filter(p=>p.isBot).length,0),leaderboardEntries:leaderboard.entries(500).length}));
 app.get('/leaderboard',(req,res)=>res.json(leaderboardPayload(req.query.limit||100)));
 
 function roomCode(){const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let c;do{c=Array.from({length:5},()=>chars[Math.floor(Math.random()*chars.length)]).join('');}while(rooms.has(c));return c;}
